@@ -2,7 +2,7 @@ from io import BytesIO
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict
 
 app = FastAPI()
 
@@ -19,11 +19,21 @@ class Synergy(BaseModel):
     action: str
     score: int
 
+class Sessions(BaseModel):
+    sydney: bool
+    tokyo: bool
+    london: bool
+    new_york: bool
+    active_kz: str
+    bsl: float
+    ssl: float
+
 class EmeraldPayload(BaseModel):
     pair: str
     tf: str = "5m"
     price: float
     chart_image: Optional[str] = None
+    sessions: Optional[Sessions] = None
     metrics: Metrics
     synergy: Synergy
 
@@ -63,13 +73,13 @@ async def get_pair_data(pair: str, tf: str = Query("5m")):
         "tf": tf,
         "price": 0.0,
         "chart_image": None,
+        "sessions": {
+            "sydney": False, "tokyo": False, "london": False, "new_york": False,
+            "active_kz": "Inter-Session", "bsl": 0.0, "ssl": 0.0
+        },
         "metrics": {
-            "trend_htf": "WAIT",
-            "hurst": 0.5,
-            "entry_dist": "0.0%",
-            "lppl_state": "WAIT",
-            "zone_status": "WAIT",
-            "info_ratio": 0.0
+            "trend_htf": "WAIT", "hurst": 0.5, "entry_dist": "0.0%",
+            "lppl_state": "WAIT", "zone_status": "WAIT", "info_ratio": 0.0
         },
         "synergy": {"verdict": "NEUTRAL WAIT", "action": "WAIT", "score": 50}
     }
@@ -126,18 +136,19 @@ async def serve_mini_app():
             <button onclick="changeTf('1D', this)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 text-gray-400 transition">1D</button>
         </div>
 
+        <!-- ВКЛАДКА: ТЕРМИНАЛ -->
         <div id="tab-terminal" class="space-y-4">
             
             <div class="glass-card rounded-2xl p-3 relative overflow-hidden">
                 <div class="flex justify-between items-center mb-2 px-1">
                     <span class="text-[11px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
-                        <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span> Python Quantum Chart
+                        <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span> QUANTUM CHART
                     </span>
                     <span id="chart-tf-badge" class="text-[10px] font-extrabold text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/30">5m</span>
                 </div>
                 
                 <div id="chart-box" class="w-full h-[220px] rounded-xl overflow-hidden bg-[#0b0f15] border border-gray-800 flex items-center justify-center">
-                    <span class="text-xs text-cyan-400 font-semibold animate-pulse">Загрузка графика...</span>
+                    <span class="text-xs text-cyan-400 font-semibold animate-pulse">Загрузка графического ядра...</span>
                 </div>
             </div>
 
@@ -196,24 +207,71 @@ async def serve_mini_app():
             </div>
         </div>
 
+        <!-- ВКЛАДКА: СЕССИИ И ICT KILLZONES -->
         <div id="tab-sessions" class="space-y-4 hidden">
             <div class="glass-card rounded-2xl p-4">
-                <h3 class="text-sm font-extrabold text-white mb-1">Сессии и ICT Killzones</h3>
-                <p class="text-[11px] text-gray-400 mb-4 font-medium">Время мировых бирж · UTC</p>
-                <div class="space-y-2.5">
-                    <div class="flex justify-between items-center bg-gray-950/60 p-3 rounded-xl border border-gray-800">
-                        <span class="text-xs font-bold text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-400"></span> Сидней</span>
-                        <span class="text-xs font-extrabold text-emerald-400">АКТИВНО</span>
+                <div class="flex items-center space-x-2 mb-1">
+                    <div class="w-6 h-6 rounded-lg bg-cyan-500/20 text-cyan-400 flex items-center justify-center">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                     </div>
-                    <div class="flex justify-between items-center bg-gray-950/60 p-3 rounded-xl border border-gray-800">
-                        <span class="text-xs font-bold text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-400"></span> Токио</span>
-                        <span class="text-xs font-extrabold text-emerald-400">АКТИВНО</span>
+                    <h3 class="text-sm font-extrabold text-white">Сессии и ICT Killzones</h3>
+                </div>
+                <p class="text-[11px] text-gray-400 mb-4">Время мировых бирж · UTC</p>
+
+                <!-- Шкала времени и сессии -->
+                <div class="space-y-3 bg-gray-950/60 p-3.5 rounded-xl border border-gray-800/80">
+                    <div class="flex justify-between items-center text-xs">
+                        <span id="sess-sydney" class="font-bold text-gray-400 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-gray-600"></span> Сидней</span>
+                        <span id="sess-sydney-status" class="text-[11px] font-extrabold text-gray-500">—</span>
                     </div>
+                    <div class="flex justify-between items-center text-xs">
+                        <span id="sess-tokyo" class="font-bold text-gray-400 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-gray-600"></span> Токио</span>
+                        <span id="sess-tokyo-status" class="text-[11px] font-extrabold text-gray-500">—</span>
+                    </div>
+                    <div class="flex justify-between items-center text-xs">
+                        <span id="sess-london" class="font-bold text-gray-400 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-gray-600"></span> Лондон</span>
+                        <span id="sess-london-status" class="text-[11px] font-extrabold text-gray-500">—</span>
+                    </div>
+                    <div class="flex justify-between items-center text-xs">
+                        <span id="sess-ny" class="font-bold text-gray-400 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-gray-600"></span> Нью-Йорк</span>
+                        <span id="sess-ny-status" class="text-[11px] font-extrabold text-gray-500">—</span>
+                    </div>
+
+                    <div class="flex justify-between text-[10px] text-gray-500 pt-2 border-t border-gray-900 font-mono">
+                        <span>00</span><span>06</span><span>12</span><span>18</span><span>24</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Блок активной Killzone -->
+            <div class="glass-card rounded-2xl p-4 flex justify-between items-center">
+                <div>
+                    <div class="text-[10px] uppercase font-bold text-gray-400 mb-0.5">Killzone активна</div>
+                    <div id="kz-name" class="text-base font-black text-emerald-400">Asian KZ</div>
+                </div>
+                <div class="text-right">
+                    <div class="text-[10px] text-gray-400">до закрытия</div>
+                    <div id="kz-timer" class="text-sm font-mono font-bold text-white">00:36:33</div>
+                </div>
+            </div>
+
+            <!-- Уровни ликвидности -->
+            <div class="grid grid-cols-2 gap-3">
+                <div class="glass-card p-4 rounded-2xl">
+                    <div class="text-[11px] font-bold text-emerald-400 mb-1 flex items-center gap-1">↑ Ликвидность BSL</div>
+                    <div id="val-bsl" class="text-lg font-black text-white">1.2749</div>
+                    <div class="text-[10px] text-gray-400 mt-0.5">Ликвидность покупателей</div>
+                </div>
+                <div class="glass-card p-4 rounded-2xl">
+                    <div class="text-[11px] font-bold text-rose-400 mb-1 flex items-center gap-1">↓ Ликвидность SSL</div>
+                    <div id="val-ssl" class="text-lg font-black text-white">1.2672</div>
+                    <div class="text-[10px] text-gray-400 mt-0.5">Ликвидность продавцов</div>
                 </div>
             </div>
         </div>
     </div>
 
+    <!-- Нижняя навигация -->
     <div class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-[#070b0f]/95 backdrop-blur-2xl border-t border-gray-800/80 px-6 py-3 flex justify-between items-center z-50">
         <button onclick="switchTab('terminal')" id="nav-terminal" class="flex flex-col items-center gap-1 text-cyan-400 transition">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
@@ -275,6 +333,33 @@ async def serve_mini_app():
             fetchData();
         }
 
+        function updateSessionUI(s) {
+            if (!s) return;
+            
+            const updateRow = (name, isActive) => {
+                const dot = document.querySelector(`#sess-${name} span`);
+                const status = document.getElementById(`sess-${name}-status`);
+                if (isActive) {
+                    dot.className = "w-2 h-2 rounded-full bg-emerald-400 animate-ping";
+                    status.innerText = "АКТ.";
+                    status.className = "text-[11px] font-extrabold text-emerald-400";
+                } else {
+                    dot.className = "w-2 h-2 rounded-full bg-gray-600";
+                    status.innerText = "—";
+                    status.className = "text-[11px] font-extrabold text-gray-500";
+                }
+            };
+
+            updateRow('sydney', s.sydney);
+            updateRow('tokyo', s.tokyo);
+            updateRow('london', s.london);
+            updateRow('ny', s.new_york);
+
+            document.getElementById('kz-name').innerText = s.active_kz;
+            document.getElementById('val-bsl').innerText = s.bsl;
+            document.getElementById('val-ssl').innerText = s.ssl;
+        }
+
         async function fetchData() {
             try {
                 const res = await fetch(`/api/data/${encodeURIComponent(currentPair)}?tf=${currentTf}`);
@@ -289,7 +374,11 @@ async def serve_mini_app():
                 document.getElementById('v-score').innerText = data.synergy.score + '/100';
 
                 if (data.chart_image) {
-                    document.getElementById('chart-box').innerHTML = `<img src="data:image/png;base64,${data.chart_image}" class="w-full h-full object-cover rounded-xl" />`;
+                    document.getElementById('chart-box').innerHTML = `<img src="data:image/png;base64,${data.chart_image}?t=${Date.now()}" class="w-full h-full object-cover rounded-xl" />`;
+                }
+
+                if (data.sessions) {
+                    updateSessionUI(data.sessions);
                 }
 
                 const vText = document.getElementById('v-text');
@@ -317,7 +406,7 @@ async def serve_mini_app():
         }
 
         renderPairs();
-        setInterval(fetchData, 10000);
+        setInterval(fetchData, 3000);
         fetchData();
     </script>
 </body>
