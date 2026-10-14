@@ -1,7 +1,6 @@
 from io import BytesIO
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
-from PIL import Image, ImageDraw, ImageFont
 from pydantic import BaseModel
 
 app = FastAPI()
@@ -27,37 +26,33 @@ class EmeraldPayload(BaseModel):
 
 storage = {}
 
+def normalize_pair(pair_str: str) -> str:
+    """Приводит любую пару к единому формату Xxx/Yyy"""
+    clean = pair_str.upper().replace("/", "").strip()
+    if len(clean) == 6:
+        return f"{clean[:3]}/{clean[3:]}"
+    return pair_str.upper()
+
 @app.post("/api/webhook")
 async def receive_webhook(payload: EmeraldPayload):
     try:
-        # Нормализуем название пары со слэшем (например, EURGBP -> EUR/GBP)
-        pair_raw = payload.pair.upper().replace("/", "")
-        if len(pair_raw) == 6:
-            formatted_pair = f"{pair_raw[:3]}/{pair_raw[3:]}"
-        else:
-            formatted_pair = payload.pair.upper()
-            
+        norm_pair = normalize_pair(payload.pair)
         data = payload.dict()
-        data["pair"] = formatted_pair
-        storage[formatted_pair] = data
-        print(f"✅ Данные обновлены для {formatted_pair} | Вердикт: {payload.synergy.verdict}")
-        return {"status": "success", "pair": formatted_pair}
+        data["pair"] = norm_pair
+        storage[norm_pair] = data
+        print(f"✅ Данные приняты для {norm_pair} | Цена: {data['price']}")
+        return {"status": "success", "pair": norm_pair}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.get("/api/data/{pair}")
+@app.get("/api/data/{pair:path}")
 async def get_pair_data(pair: str):
-    # Принимаем пару в формате EUR/GBP или EURGBP
-    pair_clean = pair.upper().replace("/", "")
-    if len(pair_clean) == 6:
-        formatted_pair = f"{pair_clean[:3]}/{pair_clean[3:]}"
-    else:
-        formatted_pair = pair.upper()
-        
-    if formatted_pair in storage:
-        return storage[formatted_pair]
+    norm_pair = normalize_pair(pair)
+    if norm_pair in storage:
+        return storage[norm_pair]
+    # Возвращаем заглушку, если данных по паре еще не было
     return {
-        "pair": formatted_pair,
+        "pair": norm_pair,
         "price": 0.0,
         "metrics": {
             "trend_htf": "WAIT",
@@ -92,7 +87,6 @@ async def serve_mini_app():
 </head>
 <body class="pb-24 max-w-md mx-auto min-h-screen flex flex-col justify-between selection:bg-cyan-500 selection:text-white">
     
-    <!-- Верхняя шапка -->
     <div class="p-4">
         <div class="flex justify-between items-center mb-4">
             <div class="flex items-center space-x-2.5">
@@ -111,7 +105,7 @@ async def serve_mini_app():
             </div>
         </div>
 
-        <!-- Переключатель пар со слэшем -->
+        <!-- Переключатель пар -->
         <div class="grid grid-cols-3 gap-2 mb-5">
             <button onclick="changePair('EUR/GBP')" id="btn-EUR/GBP" class="py-2.5 px-2 rounded-xl active-tab text-cyan-300 font-extrabold text-xs transition active:scale-95 flex flex-col items-center">
                 <span>EUR/GBP</span>
@@ -127,11 +121,8 @@ async def serve_mini_app():
             </button>
         </div>
 
-        <!-- КОНТЕНТ ВКЛАДКИ: ТЕРМИНАЛ -->
         <div id="tab-terminal" class="space-y-4">
-            <!-- Основная карточка цены и вердикта -->
             <div id="main-card" class="glass-card rounded-2xl p-5 transition-all duration-300 relative overflow-hidden">
-                <!-- Декоративный градиентный засвет на фоне карточки -->
                 <div class="absolute -right-10 -top-10 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
                 <div class="flex justify-between items-center mb-2">
@@ -139,7 +130,7 @@ async def serve_mini_app():
                         <span class="w-2 h-2 rounded-full bg-emerald-400"></span> ПРЯМО СЕЙЧАС
                     </span>
                     <span id="badge-trend" class="px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-xs font-extrabold tracking-wide flex items-center gap-1">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg> БЫЧИЙ ТРЕНД
+                        БЫЧИЙ ТРЕНД
                     </span>
                 </div>
 
@@ -151,7 +142,6 @@ async def serve_mini_app():
                     </div>
                 </div>
 
-                <!-- Блок вердикта со шкалой -->
                 <div class="bg-gray-950/70 p-4 rounded-xl border border-gray-800/80 shadow-inner">
                     <div class="text-[10px] font-extrabold uppercase tracking-widest text-gray-400 mb-1">Вердикт алгоритма</div>
                     <div id="v-text" class="text-lg font-black text-emerald-400 tracking-wide">СИЛЬНЫЙ ПОКУПАТЬ</div>
@@ -166,7 +156,6 @@ async def serve_mini_app():
                 </div>
             </div>
 
-            <!-- Сетка метрик -->
             <div class="grid grid-cols-2 gap-3">
                 <div class="glass-card p-4 rounded-2xl relative overflow-hidden">
                     <div class="text-[10px] uppercase font-bold text-gray-400 mb-1">Индекс Херста</div>
@@ -191,36 +180,24 @@ async def serve_mini_app():
             </div>
         </div>
 
-        <!-- КОНТЕНТ ВКЛАДКИ: СЕССИИ (СКРЫТО ПО УМОЛЧАНИЮ) -->
         <div id="tab-sessions" class="space-y-4 hidden">
             <div class="glass-card rounded-2xl p-4">
                 <h3 class="text-sm font-extrabold text-white mb-1">Сессии и ICT Killzones</h3>
                 <p class="text-[11px] text-gray-400 mb-4 font-medium">Время мировых бирж · UTC</p>
-                
                 <div class="space-y-2.5">
                     <div class="flex justify-between items-center bg-gray-950/60 p-3 rounded-xl border border-gray-800">
-                        <span class="text-xs font-bold text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400"></span> Сидней</span>
+                        <span class="text-xs font-bold text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-400"></span> Сидней</span>
                         <span class="text-xs font-extrabold text-emerald-400">АКТИВНО</span>
                     </div>
                     <div class="flex justify-between items-center bg-gray-950/60 p-3 rounded-xl border border-gray-800">
-                        <span class="text-xs font-bold text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400"></span> Токио</span>
+                        <span class="text-xs font-bold text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-400"></span> Токио</span>
                         <span class="text-xs font-extrabold text-emerald-400">АКТИВНО</span>
-                    </div>
-                    <div class="flex justify-between items-center bg-gray-950/60 p-3 rounded-xl border border-gray-800">
-                        <span class="text-xs font-bold text-gray-400 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-gray-600"></span> Лондон</span>
-                        <span class="text-xs font-semibold text-gray-500">—</span>
-                    </div>
-                    <div class="flex justify-between items-center bg-gray-950/60 p-3 rounded-xl border border-gray-800">
-                        <span class="text-xs font-bold text-gray-400 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-gray-600"></span> Нью-Йорк</span>
-                        <span class="text-xs font-semibold text-gray-500">—</span>
                     </div>
                 </div>
             </div>
         </div>
-
     </div>
 
-    <!-- Нижняя панель навигации -->
     <div class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-[#070b0f]/95 backdrop-blur-2xl border-t border-gray-800/80 px-6 py-3 flex justify-between items-center z-50">
         <button onclick="switchTab('terminal')" id="nav-terminal" class="flex flex-col items-center gap-1 text-cyan-400 transition">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
@@ -229,14 +206,6 @@ async def serve_mini_app():
         <button onclick="switchTab('sessions')" id="nav-sessions" class="flex flex-col items-center gap-1 text-gray-500 hover:text-gray-300 transition">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
             <span class="text-[10px] font-semibold">Сессии</span>
-        </button>
-        <button onclick="alert('Раздел сигналов в разработке')" class="flex flex-col items-center gap-1 text-gray-500 hover:text-gray-300 transition">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
-            <span class="text-[10px] font-semibold">Сигналы</span>
-        </button>
-        <button onclick="alert('Настройки аккаунта Клуба')" class="flex flex-col items-center gap-1 text-gray-500 hover:text-gray-300 transition">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.08 1.97.53 2.572 1.065z"></path></svg>
-            <span class="text-[10px] font-semibold">Настройки</span>
         </button>
     </div>
 
@@ -260,7 +229,6 @@ async def serve_mini_app():
         function changePair(pair) {
             currentPair = pair;
             ['EUR/GBP', 'BTC/USD', 'XAU/USD'].forEach(p => {
-                const btnId = p.replace('/', '');
                 const btn = document.getElementById(`btn-${p}`);
                 if (p === pair) {
                     btn.className = "py-2.5 px-2 rounded-xl active-tab text-cyan-300 font-extrabold text-xs transition active:scale-95 flex flex-col items-center";
@@ -295,17 +263,14 @@ async def serve_mini_app():
                     card.className = "glass-card rounded-2xl p-5 transition-all duration-300 relative overflow-hidden glow-buy";
                     vText.style.color = '#00ff88';
                     badgeTrend.innerText = 'БЫЧИЙ ТРЕНД';
-                    badgeTrend.className = "px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-xs font-extrabold tracking-wide flex items-center gap-1";
                 } else if (data.synergy.action === 'SELL') {
                     card.className = "glass-card rounded-2xl p-5 transition-all duration-300 relative overflow-hidden glow-sell";
                     vText.style.color = '#ff3b30';
                     badgeTrend.innerText = 'МЕДВЕЖИЙ ТРЕНД';
-                    badgeTrend.className = "px-3 py-1 rounded-full bg-rose-500/15 border border-rose-500/40 text-rose-400 text-xs font-extrabold tracking-wide flex items-center gap-1";
                 } else {
                     card.className = "glass-card rounded-2xl p-5 transition-all duration-300 relative overflow-hidden";
                     vText.style.color = '#ffd700';
                     badgeTrend.innerText = 'ОЖИДАНИЕ';
-                    badgeTrend.className = "px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/40 text-amber-400 text-xs font-extrabold tracking-wide flex items-center gap-1";
                 }
             } catch (e) {
                 console.error(e);
