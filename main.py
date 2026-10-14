@@ -2,7 +2,7 @@ from io import BytesIO
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from typing import Optional, Dict
+from typing import Optional
 
 app = FastAPI()
 
@@ -218,7 +218,6 @@ async def serve_mini_app():
                 </div>
                 <p class="text-[11px] text-gray-400 mb-4">Время мировых бирж · UTC</p>
 
-                <!-- Шкала времени и сессии -->
                 <div class="space-y-3 bg-gray-950/60 p-3.5 rounded-xl border border-gray-800/80">
                     <div class="flex justify-between items-center text-xs">
                         <span id="sess-sydney" class="font-bold text-gray-400 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-gray-600"></span> Сидней</span>
@@ -243,7 +242,6 @@ async def serve_mini_app():
                 </div>
             </div>
 
-            <!-- Блок активной Killzone -->
             <div class="glass-card rounded-2xl p-4 flex justify-between items-center">
                 <div>
                     <div class="text-[10px] uppercase font-bold text-gray-400 mb-0.5">Killzone активна</div>
@@ -255,7 +253,6 @@ async def serve_mini_app():
                 </div>
             </div>
 
-            <!-- Уровни ликвидности -->
             <div class="grid grid-cols-2 gap-3">
                 <div class="glass-card p-4 rounded-2xl">
                     <div class="text-[11px] font-bold text-emerald-400 mb-1 flex items-center gap-1">↑ Ликвидность BSL</div>
@@ -271,7 +268,6 @@ async def serve_mini_app():
         </div>
     </div>
 
-    <!-- Нижняя навигация -->
     <div class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-[#070b0f]/95 backdrop-blur-2xl border-t border-gray-800/80 px-6 py-3 flex justify-between items-center z-50">
         <button onclick="switchTab('terminal')" id="nav-terminal" class="flex flex-col items-center gap-1 text-cyan-400 transition">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
@@ -374,7 +370,8 @@ async def serve_mini_app():
                 document.getElementById('v-score').innerText = data.synergy.score + '/100';
 
                 if (data.chart_image) {
-                    document.getElementById('chart-box').innerHTML = `<img src="data:image/png;base64,${data.chart_image}?t=${Date.now()}" class="w-full h-full object-cover rounded-xl" />`;
+                    // Убран некорректный параметр ?t= из base64 строки
+                    document.getElementById('chart-box').innerHTML = `<img src="data:image/png;base64,${data.chart_image}" class="w-full h-full object-cover rounded-xl" />`;
                 }
 
                 if (data.sessions) {
