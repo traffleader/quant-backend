@@ -1,4 +1,3 @@
-from io import BytesIO
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -30,9 +29,8 @@ class Sessions(BaseModel):
 
 class EmeraldPayload(BaseModel):
     pair: str
-    tf: str = "5m"
+    tf: str = "5"
     price: float
-    chart_image: Optional[str] = None
     sessions: Optional[Sessions] = None
     metrics: Metrics
     synergy: Synergy
@@ -49,30 +47,21 @@ def normalize_key(pair_str: str) -> str:
 async def receive_webhook(payload: EmeraldPayload):
     try:
         norm_key = normalize_key(payload.pair)
-        storage_key = f"{norm_key}_{payload.tf}"
-        data = payload.dict()
-        data["pair"] = norm_key
-        storage[storage_key] = data
-        return {"status": "success", "storage_key": storage_key}
+        storage[norm_key] = payload.dict()
+        storage[norm_key]["pair"] = norm_key
+        return {"status": "success", "pair": norm_key}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/data/{pair:path}")
-async def get_pair_data(pair: str, tf: str = Query("5m")):
+async def get_pair_data(pair: str):
     norm_key = normalize_key(pair)
-    storage_key = f"{norm_key}_{tf}"
-    if storage_key in storage:
-        return storage[storage_key]
-        
-    for key in storage:
-        if key.startswith(norm_key):
-            return storage[key]
+    if norm_key in storage:
+        return storage[norm_key]
             
     return {
         "pair": norm_key,
-        "tf": tf,
         "price": 0.0,
-        "chart_image": None,
         "sessions": {
             "sydney": False, "tokyo": False, "london": False, "new_york": False,
             "active_kz": "Inter-Session", "bsl": 0.0, "ssl": 0.0
@@ -95,6 +84,7 @@ async def serve_mini_app():
     <title>Quant PRO Analytics</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         body { background-color: #080c10; color: #f3f4f6; font-family: 'Plus Jakarta Sans', sans-serif; }
@@ -108,6 +98,7 @@ async def serve_mini_app():
 <body class="pb-24 max-w-md mx-auto min-h-screen flex flex-col justify-between selection:bg-cyan-500 selection:text-white">
     
     <div class="p-4">
+        <!-- Шапка -->
         <div class="flex justify-between items-center mb-4">
             <div class="flex items-center space-x-2.5">
                 <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 via-teal-400 to-emerald-400 flex items-center justify-center shadow-lg shadow-cyan-500/25">
@@ -125,33 +116,35 @@ async def serve_mini_app():
             </div>
         </div>
 
+        <!-- Сетка пар (2 ряда по 3) -->
         <div id="pairs-container" class="grid grid-cols-3 gap-2 mb-3"></div>
 
+        <!-- Таймфреймы -->
         <div class="flex gap-1.5 mb-4 overflow-x-auto pb-1" id="tf-container">
-            <button onclick="changeTf('1m', this)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 text-gray-400 transition">1m</button>
-            <button onclick="changeTf('5m', this)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold active-tf transition">5m</button>
-            <button onclick="changeTf('15m', this)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 text-gray-400 transition">15m</button>
-            <button onclick="changeTf('1h', this)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 text-gray-400 transition">1h</button>
-            <button onclick="changeTf('4h', this)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 text-gray-400 transition">4h</button>
-            <button onclick="changeTf('1D', this)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 text-gray-400 transition">1D</button>
+            <button onclick="changeTf('1', this)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 text-gray-400 transition">1m</button>
+            <button onclick="changeTf('5', this)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold active-tf transition">5m</button>
+            <button onclick="changeTf('15', this)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 text-gray-400 transition">15m</button>
+            <button onclick="changeTf('60', this)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 text-gray-400 transition">1h</button>
+            <button onclick="changeTf('240', this)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 text-gray-400 transition">4h</button>
+            <button onclick="changeTf('D', this)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 text-gray-400 transition">1D</button>
         </div>
 
         <!-- ВКЛАДКА: ТЕРМИНАЛ -->
         <div id="tab-terminal" class="space-y-4">
             
+            <!-- ИНТЕРАКТИВНЫЙ ГРАФИК TRADINGVIEW -->
             <div class="glass-card rounded-2xl p-3 relative overflow-hidden">
                 <div class="flex justify-between items-center mb-2 px-1">
                     <span class="text-[11px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
                         <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span> QUANTUM CHART
                     </span>
-                    <span id="chart-tf-badge" class="text-[10px] font-extrabold text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/30">5m</span>
+                    <span id="chart-symbol-label" class="text-[10px] font-extrabold text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/30">FX:EURGBP</span>
                 </div>
                 
-                <div id="chart-box" class="w-full h-[220px] rounded-xl overflow-hidden bg-[#0b0f15] border border-gray-800 flex items-center justify-center">
-                    <span class="text-xs text-cyan-400 font-semibold animate-pulse">Загрузка графического ядра...</span>
-                </div>
+                <div id="tradingview_widget" class="w-full h-[280px] rounded-xl overflow-hidden border border-gray-800"></div>
             </div>
 
+            <!-- Карточка сигнала и котировки -->
             <div id="main-card" class="glass-card rounded-2xl p-5 transition-all duration-300 relative overflow-hidden">
                 <div class="flex justify-between items-center mb-2">
                     <span class="text-[11px] font-bold tracking-wider text-gray-400 flex items-center gap-1.5">
@@ -183,6 +176,7 @@ async def serve_mini_app():
                 </div>
             </div>
 
+            <!-- Метрики Python-движка -->
             <div class="grid grid-cols-2 gap-3">
                 <div class="glass-card p-4 rounded-2xl relative overflow-hidden">
                     <div class="text-[10px] uppercase font-bold text-gray-400 mb-1">Индекс Херста</div>
@@ -268,6 +262,7 @@ async def serve_mini_app():
         </div>
     </div>
 
+    <!-- Нижняя навигация -->
     <div class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-[#070b0f]/95 backdrop-blur-2xl border-t border-gray-800/80 px-6 py-3 flex justify-between items-center z-50">
         <button onclick="switchTab('terminal')" id="nav-terminal" class="flex flex-col items-center gap-1 text-cyan-400 transition">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
@@ -280,9 +275,17 @@ async def serve_mini_app():
     </div>
 
     <script>
-        const pairsList = ['EUR/GBP', 'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD'];
-        let currentPair = 'EUR/GBP';
-        let currentTf = '5m';
+        const pairsList = [
+            { name: 'EUR/GBP', tv: 'FX:EURGBP' },
+            { name: 'EUR/USD', tv: 'FX:EURUSD' },
+            { name: 'GBP/USD', tv: 'FX:GBPUSD' },
+            { name: 'USD/JPY', tv: 'FX:USDJPY' },
+            { name: 'AUD/USD', tv: 'FX:AUDUSD' },
+            { name: 'USD/CAD', tv: 'FX:USDCAD' }
+        ];
+        
+        let currentPairObj = pairsList[0];
+        let currentInterval = '5'; // по умолчанию 5м
 
         function renderPairs() {
             const container = document.getElementById('pairs-container');
@@ -290,22 +293,39 @@ async def serve_mini_app():
             pairsList.forEach(p => {
                 const btn = document.createElement('button');
                 btn.onclick = () => changePair(p);
-                btn.className = p === currentPair ? 
+                btn.className = p.name === currentPairObj.name ? 
                     "py-2.5 px-1 rounded-xl active-tab text-cyan-300 font-extrabold text-xs transition active:scale-95 text-center flex items-center justify-center" :
                     "py-2.5 px-1 rounded-xl glass-card text-gray-400 font-semibold text-xs transition active:scale-95 text-center flex items-center justify-center";
-                btn.innerText = p;
+                btn.innerText = p.name;
                 container.appendChild(btn);
             });
         }
 
+        function initChart() {
+            document.getElementById('chart-symbol-label').innerText = currentPairObj.tv;
+            document.getElementById('tradingview_widget').innerHTML = '';
+            new TradingView.widget({
+                "autosize": true,
+                "symbol": currentPairObj.tv,
+                "interval": currentInterval,
+                "timezone": "Etc/UTC",
+                "theme": "dark",
+                "style": "1",
+                "locale": "ru",
+                "toolbar_bg": "#080c10",
+                "enable_publishing": false,
+                "hide_side_toolbar": false,
+                "container_id": "tradingview_widget"
+            });
+        }
+
         function changeTf(tf, btnElement) {
-            currentTf = tf;
-            document.getElementById('chart-tf-badge').innerText = tf;
+            currentInterval = tf;
             document.querySelectorAll('.tf-btn').forEach(b => {
                 b.className = "tf-btn px-3 py-1 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 text-gray-400 transition";
             });
             btnElement.className = "tf-btn px-3 py-1 rounded-lg text-xs font-bold active-tf transition";
-            fetchData();
+            initChart();
         }
 
         function switchTab(tab) {
@@ -322,16 +342,16 @@ async def serve_mini_app():
             }
         }
 
-        function changePair(pair) {
-            currentPair = pair;
+        function changePair(pairObj) {
+            currentPairObj = pairObj;
             renderPairs();
-            document.getElementById('pair-title').innerText = pair;
+            document.getElementById('pair-title').innerText = pairObj.name;
+            initChart();
             fetchData();
         }
 
         function updateSessionUI(s) {
             if (!s) return;
-            
             const updateRow = (name, isActive) => {
                 const dot = document.querySelector(`#sess-${name} span`);
                 const status = document.getElementById(`sess-${name}-status`);
@@ -345,7 +365,6 @@ async def serve_mini_app():
                     status.className = "text-[11px] font-extrabold text-gray-500";
                 }
             };
-
             updateRow('sydney', s.sydney);
             updateRow('tokyo', s.tokyo);
             updateRow('london', s.london);
@@ -358,7 +377,7 @@ async def serve_mini_app():
 
         async function fetchData() {
             try {
-                const res = await fetch(`/api/data/${encodeURIComponent(currentPair)}?tf=${currentTf}`);
+                const res = await fetch(`/api/data/${encodeURIComponent(currentPairObj.name)}`);
                 if (!res.ok) return;
                 const data = await res.json();
 
@@ -368,11 +387,6 @@ async def serve_mini_app():
                 document.getElementById('m-lppl').innerText = data.metrics.lppl_state;
                 document.getElementById('m-ir').innerText = data.metrics.info_ratio;
                 document.getElementById('v-score').innerText = data.synergy.score + '/100';
-
-                if (data.chart_image) {
-                    // Убран некорректный параметр ?t= из base64 строки
-                    document.getElementById('chart-box').innerHTML = `<img src="data:image/png;base64,${data.chart_image}" class="w-full h-full object-cover rounded-xl" />`;
-                }
 
                 if (data.sessions) {
                     updateSessionUI(data.sessions);
@@ -403,6 +417,7 @@ async def serve_mini_app():
         }
 
         renderPairs();
+        initChart();
         setInterval(fetchData, 3000);
         fetchData();
     </script>
