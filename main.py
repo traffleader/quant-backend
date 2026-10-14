@@ -2,6 +2,7 @@ from io import BytesIO
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
+from typing import Optional
 
 app = FastAPI()
 
@@ -21,6 +22,7 @@ class Synergy(BaseModel):
 class EmeraldPayload(BaseModel):
     pair: str
     price: float
+    chart_image: Optional[str] = None
     metrics: Metrics
     synergy: Synergy
 
@@ -39,7 +41,7 @@ async def receive_webhook(payload: EmeraldPayload):
         data = payload.dict()
         data["pair"] = norm_key
         storage[norm_key] = data
-        print(f"✅ Данные приняты для {norm_key} | Цена: {data['price']}")
+        print(f"✅ Данные и график приняты для {norm_key}")
         return {"status": "success", "pair": norm_key}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -54,6 +56,7 @@ async def get_pair_data(pair: str):
     return {
         "pair": norm_key,
         "price": 0.0,
+        "chart_image": None,
         "metrics": {
             "trend_htf": "WAIT",
             "hurst": 0.5,
@@ -83,11 +86,13 @@ async def serve_mini_app():
         .glow-buy { box-shadow: 0 0 35px rgba(0, 255, 136, 0.15); border-color: rgba(0, 255, 136, 0.4); background: linear-gradient(145deg, rgba(12, 30, 24, 0.9) 0%, rgba(8, 14, 20, 0.95) 100%); }
         .glow-sell { box-shadow: 0 0 35px rgba(255, 59, 48, 0.15); border-color: rgba(255, 59, 48, 0.4); background: linear-gradient(145deg, rgba(35, 15, 20, 0.9) 0%, rgba(8, 14, 20, 0.95) 100%); }
         .active-tab { background: linear-gradient(135deg, rgba(0, 229, 255, 0.2) 0%, rgba(0, 153, 255, 0.08) 100%); border: 1px solid rgba(0, 229, 255, 0.5); box-shadow: 0 0 20px rgba(0, 229, 255, 0.15); }
+        .active-tf { background: rgba(0, 229, 255, 0.15); border: 1px solid rgba(0, 229, 255, 0.4); color: #00e5ff; }
     </style>
 </head>
 <body class="pb-24 max-w-md mx-auto min-h-screen flex flex-col justify-between selection:bg-cyan-500 selection:text-white">
     
     <div class="p-4">
+        <!-- Шапка -->
         <div class="flex justify-between items-center mb-4">
             <div class="flex items-center space-x-2.5">
                 <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 via-teal-400 to-emerald-400 flex items-center justify-center shadow-lg shadow-cyan-500/25">
@@ -105,18 +110,42 @@ async def serve_mini_app():
             </div>
         </div>
 
-        <!-- Сетка выбора Forex пар (2 ряда по 3 пары — всё видно на экране без скролла) -->
-        <div id="pairs-container" class="grid grid-cols-3 gap-2 mb-5"></div>
+        <!-- Выбор пар -->
+        <div id="pairs-container" class="grid grid-cols-3 gap-2 mb-3"></div>
+
+        <!-- Переключатель таймфреймов -->
+        <div class="flex gap-1.5 mb-4 overflow-x-auto pb-1" id="tf-container">
+            <button onclick="changeTf('1m', this)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 text-gray-400 transition">1m</button>
+            <button onclick="changeTf('5m', this)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold active-tf transition">5m</button>
+            <button onclick="changeTf('15m', this)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 text-gray-400 transition">15m</button>
+            <button onclick="changeTf('1h', this)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 text-gray-400 transition">1h</button>
+            <button onclick="changeTf('4h', this)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 text-gray-400 transition">4h</button>
+            <button onclick="changeTf('1D', this)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 text-gray-400 transition">1D</button>
+        </div>
 
         <div id="tab-terminal" class="space-y-4">
-            <div id="main-card" class="glass-card rounded-2xl p-5 transition-all duration-300 relative overflow-hidden">
-                <div class="absolute -right-10 -top-10 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none"></div>
+            
+            <!-- ОКОШКО С НАШИМ PYTHON-ГРАФИКОМ -->
+            <div class="glass-card rounded-2xl p-3 relative overflow-hidden">
+                <div class="flex justify-between items-center mb-2 px-1">
+                    <span class="text-[11px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span> Python Quantum Chart
+                    </span>
+                    <span id="chart-tf-badge" class="text-[10px] font-extrabold text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/30">5m</span>
+                </div>
+                
+                <div id="chart-box" class="w-full h-[220px] rounded-xl overflow-hidden bg-[#0b0f15] border border-gray-800 flex items-center justify-center">
+                    <span class="text-xs text-gray-500 font-semibold animate-pulse">Загрузка Python-графика...</span>
+                </div>
+            </div>
 
+            <!-- Карточка вердикта -->
+            <div id="main-card" class="glass-card rounded-2xl p-5 transition-all duration-300 relative overflow-hidden">
                 <div class="flex justify-between items-center mb-2">
                     <span class="text-[11px] font-bold tracking-wider text-gray-400 flex items-center gap-1.5">
                         <span class="w-2 h-2 rounded-full bg-emerald-400"></span> ПРЯМО СЕЙЧАС
                     </span>
-                    <span id="badge-trend" class="px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-xs font-extrabold tracking-wide flex items-center gap-1">
+                    <span id="badge-trend" class="px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-xs font-extrabold tracking-wide">
                         ОЖИДАНИЕ
                     </span>
                 </div>
@@ -142,6 +171,7 @@ async def serve_mini_app():
                 </div>
             </div>
 
+            <!-- Сетка метрик -->
             <div class="grid grid-cols-2 gap-3">
                 <div class="glass-card p-4 rounded-2xl relative overflow-hidden">
                     <div class="text-[10px] uppercase font-bold text-gray-400 mb-1">Индекс Херста</div>
@@ -213,6 +243,14 @@ async def serve_mini_app():
             });
         }
 
+        function changeTf(tf, btnElement) {
+            document.getElementById('chart-tf-badge').innerText = tf;
+            document.querySelectorAll('.tf-btn').forEach(b => {
+                b.className = "tf-btn px-3 py-1 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 text-gray-400 transition";
+            });
+            btnElement.className = "tf-btn px-3 py-1 rounded-lg text-xs font-bold active-tf transition";
+        }
+
         function switchTab(tab) {
             if (tab === 'terminal') {
                 document.getElementById('tab-terminal').classList.remove('hidden');
@@ -246,6 +284,11 @@ async def serve_mini_app():
                 document.getElementById('m-lppl').innerText = data.metrics.lppl_state;
                 document.getElementById('m-ir').innerText = data.metrics.info_ratio;
                 document.getElementById('v-score').innerText = data.synergy.score + '/100';
+
+                // Вывод графика Python
+                if (data.chart_image) {
+                    document.getElementById('chart-box').innerHTML = `<img src="data:image/png;base64,${data.chart_image}" class="w-full h-full object-cover rounded-xl" />`;
+                }
 
                 const vText = document.getElementById('v-text');
                 vText.innerText = data.synergy.verdict;
