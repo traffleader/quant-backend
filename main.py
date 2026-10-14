@@ -1,50 +1,49 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import Optional
 
-app = FastAPI(title="Quant PRO API", version="0.1.0")
+app = FastAPI()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Pydantic-модели для строгой валидации входящих данных от TradingView / скрипта
+class Metrics(BaseModel):
+    trend_htf: str
+    hurst: float
+    entry_dist: str
+    lppl_state: str
+    zone_status: str
+    info_ratio: float
 
-# Память сервера для хранения текущего состояния рынка
-current_market_data = {
-    "pair": "EURUSD",
-    "status": "BULLISH",
-    "verdict": "STRONG BUY",
-    "price": 1.0837,
-    "change24h": "+0.42%",
-    "volatility": "High ATR",
-    "synergy": 85,
-    "eq_pro": {
-        "lpp1": "STABLE / NO BUBBLE",
-        "hurst": 0.62
-    },
-    "hqn": {
-        "adx": 32,
-        "atr": "HIGH",
-        "score": 88
-    },
-    "killzone": {
-        "active": "London Killzone",
-        "time_remaining": "01:24:10"
-    }
-}
+class Synergy(BaseModel):
+    verdict: str
+    action: str
+    score: int
 
-@app.get("/api/market-state")
-def get_market_state(pair: str = "EURUSD"):
-    # Отдает актуальные данные фронтенду в Telegram Mini App
-    return current_market_data
+class EmeraldPayload(BaseModel):
+    pair: str
+    price: float
+    metrics: Metrics
+    synergy: Synergy
+
+# Временное хранилище в памяти для последней аналитики по парам
+storage = {}
 
 @app.post("/api/webhook")
-def receive_webhook(payload: dict):
-    global current_market_data
-    # Принимает новые данные от вашего скрипта и обновляет состояние
-    current_market_data.update(payload)
-    return {"status": "success", "received": payload}
+async def receive_webhook(payload: EmeraldPayload):
+    try:
+        # Сохраняем актуальный слепок данных по конкретной торговой паре
+        storage[payload.pair] = payload.dict()
+        print(f"✅ Данные обновлены для {payload.pair} | Вердикт: {payload.synergy.verdict}")
+        return {"status": "success", "pair": payload.pair}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/data/{pair}")
+async def get_pair_data(pair: str):
+    """Эндпоинт для Telegram Mini App: отдает актуальные метрики по паре"""
+    if pair in storage:
+        return storage[pair]
+    return {"error": "Пара не найдена или данные еще не поступали"}
+
+@app.get("/api/data")
+async def get_all_data():
+    """Эндпоинт для получения всей доступной аналитики"""
+    return storage
