@@ -1,6 +1,6 @@
 from io import BytesIO
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -21,6 +21,7 @@ class Synergy(BaseModel):
 
 class EmeraldPayload(BaseModel):
     pair: str
+    tf: str = "5m"
     price: float
     chart_image: Optional[str] = None
     metrics: Metrics
@@ -38,23 +39,28 @@ def normalize_key(pair_str: str) -> str:
 async def receive_webhook(payload: EmeraldPayload):
     try:
         norm_key = normalize_key(payload.pair)
+        storage_key = f"{norm_key}_{payload.tf}"
         data = payload.dict()
         data["pair"] = norm_key
-        storage[norm_key] = data
-        print(f"✅ Данные и график приняты для {norm_key}")
-        return {"status": "success", "pair": norm_key}
+        storage[storage_key] = data
+        return {"status": "success", "storage_key": storage_key}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/data/{pair:path}")
-async def get_pair_data(pair: str):
+async def get_pair_data(pair: str, tf: str = Query("5m")):
     norm_key = normalize_key(pair)
+    storage_key = f"{norm_key}_{tf}"
+    if storage_key in storage:
+        return storage[storage_key]
+        
     for key in storage:
-        if normalize_key(key) == norm_key:
+        if key.startswith(norm_key):
             return storage[key]
             
     return {
         "pair": norm_key,
+        "tf": tf,
         "price": 0.0,
         "chart_image": None,
         "metrics": {
@@ -92,7 +98,6 @@ async def serve_mini_app():
 <body class="pb-24 max-w-md mx-auto min-h-screen flex flex-col justify-between selection:bg-cyan-500 selection:text-white">
     
     <div class="p-4">
-        <!-- Шапка -->
         <div class="flex justify-between items-center mb-4">
             <div class="flex items-center space-x-2.5">
                 <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 via-teal-400 to-emerald-400 flex items-center justify-center shadow-lg shadow-cyan-500/25">
@@ -110,10 +115,8 @@ async def serve_mini_app():
             </div>
         </div>
 
-        <!-- Выбор пар -->
         <div id="pairs-container" class="grid grid-cols-3 gap-2 mb-3"></div>
 
-        <!-- Переключатель таймфреймов -->
         <div class="flex gap-1.5 mb-4 overflow-x-auto pb-1" id="tf-container">
             <button onclick="changeTf('1m', this)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 text-gray-400 transition">1m</button>
             <button onclick="changeTf('5m', this)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold active-tf transition">5m</button>
@@ -125,7 +128,6 @@ async def serve_mini_app():
 
         <div id="tab-terminal" class="space-y-4">
             
-            <!-- ОКОШКО С НАШИМ PYTHON-ГРАФИКОМ -->
             <div class="glass-card rounded-2xl p-3 relative overflow-hidden">
                 <div class="flex justify-between items-center mb-2 px-1">
                     <span class="text-[11px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
@@ -135,11 +137,10 @@ async def serve_mini_app():
                 </div>
                 
                 <div id="chart-box" class="w-full h-[220px] rounded-xl overflow-hidden bg-[#0b0f15] border border-gray-800 flex items-center justify-center">
-                    <span class="text-xs text-gray-500 font-semibold animate-pulse">Загрузка Python-графика...</span>
+                    <span class="text-xs text-cyan-400 font-semibold animate-pulse">Загрузка графика...</span>
                 </div>
             </div>
 
-            <!-- Карточка вердикта -->
             <div id="main-card" class="glass-card rounded-2xl p-5 transition-all duration-300 relative overflow-hidden">
                 <div class="flex justify-between items-center mb-2">
                     <span class="text-[11px] font-bold tracking-wider text-gray-400 flex items-center gap-1.5">
@@ -171,7 +172,6 @@ async def serve_mini_app():
                 </div>
             </div>
 
-            <!-- Сетка метрик -->
             <div class="grid grid-cols-2 gap-3">
                 <div class="glass-card p-4 rounded-2xl relative overflow-hidden">
                     <div class="text-[10px] uppercase font-bold text-gray-400 mb-1">Индекс Херста</div>
@@ -228,6 +228,7 @@ async def serve_mini_app():
     <script>
         const pairsList = ['EUR/GBP', 'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD'];
         let currentPair = 'EUR/GBP';
+        let currentTf = '5m';
 
         function renderPairs() {
             const container = document.getElementById('pairs-container');
@@ -244,11 +245,13 @@ async def serve_mini_app():
         }
 
         function changeTf(tf, btnElement) {
+            currentTf = tf;
             document.getElementById('chart-tf-badge').innerText = tf;
             document.querySelectorAll('.tf-btn').forEach(b => {
                 b.className = "tf-btn px-3 py-1 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 text-gray-400 transition";
             });
             btnElement.className = "tf-btn px-3 py-1 rounded-lg text-xs font-bold active-tf transition";
+            fetchData();
         }
 
         function switchTab(tab) {
@@ -274,7 +277,7 @@ async def serve_mini_app():
 
         async function fetchData() {
             try {
-                const res = await fetch(`/api/data/${encodeURIComponent(currentPair)}`);
+                const res = await fetch(`/api/data/${encodeURIComponent(currentPair)}?tf=${currentTf}`);
                 if (!res.ok) return;
                 const data = await res.json();
 
@@ -285,7 +288,6 @@ async def serve_mini_app():
                 document.getElementById('m-ir').innerText = data.metrics.info_ratio;
                 document.getElementById('v-score').innerText = data.synergy.score + '/100';
 
-                // Вывод графика Python
                 if (data.chart_image) {
                     document.getElementById('chart-box').innerHTML = `<img src="data:image/png;base64,${data.chart_image}" class="w-full h-full object-cover rounded-xl" />`;
                 }
