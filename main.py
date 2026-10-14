@@ -27,7 +27,6 @@ class EmeraldPayload(BaseModel):
 storage = {}
 
 def normalize_pair(pair_str: str) -> str:
-    """Приводит любую пару к единому формату Xxx/Yyy"""
     clean = pair_str.upper().replace("/", "").strip()
     if len(clean) == 6:
         return f"{clean[:3]}/{clean[3:]}"
@@ -50,7 +49,6 @@ async def get_pair_data(pair: str):
     norm_pair = normalize_pair(pair)
     if norm_pair in storage:
         return storage[norm_pair]
-    # Возвращаем заглушку, если данных по паре еще не было
     return {
         "pair": norm_pair,
         "price": 0.0,
@@ -83,6 +81,9 @@ async def serve_mini_app():
         .glow-buy { box-shadow: 0 0 35px rgba(0, 255, 136, 0.15); border-color: rgba(0, 255, 136, 0.4); background: linear-gradient(145deg, rgba(12, 30, 24, 0.9) 0%, rgba(8, 14, 20, 0.95) 100%); }
         .glow-sell { box-shadow: 0 0 35px rgba(255, 59, 48, 0.15); border-color: rgba(255, 59, 48, 0.4); background: linear-gradient(145deg, rgba(35, 15, 20, 0.9) 0%, rgba(8, 14, 20, 0.95) 100%); }
         .active-tab { background: linear-gradient(135deg, rgba(0, 229, 255, 0.2) 0%, rgba(0, 153, 255, 0.08) 100%); border: 1px solid rgba(0, 229, 255, 0.5); box-shadow: 0 0 20px rgba(0, 229, 255, 0.15); }
+        /* Стилизация скроллбара для списка пар */
+        ::-webkit-scrollbar { height: 4px; }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 4px; }
     </style>
 </head>
 <body class="pb-24 max-w-md mx-auto min-h-screen flex flex-col justify-between selection:bg-cyan-500 selection:text-white">
@@ -97,28 +98,17 @@ async def serve_mini_app():
                     <h1 class="text-base font-extrabold tracking-tight text-white flex items-center gap-1.5">
                         Quant <span class="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-teal-300">PRO</span>
                     </h1>
-                    <p class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">ANALYTICS</p>
+                    <p class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">FOREX TERMINAL</p>
                 </div>
             </div>
             <div class="px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-bold flex items-center gap-1.5 shadow-sm shadow-emerald-500/10">
-                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span> Участник Клуба
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span> Клуб
             </div>
         </div>
 
-        <!-- Переключатель пар -->
-        <div class="grid grid-cols-3 gap-2 mb-5">
-            <button onclick="changePair('EUR/GBP')" id="btn-EUR/GBP" class="py-2.5 px-2 rounded-xl active-tab text-cyan-300 font-extrabold text-xs transition active:scale-95 flex flex-col items-center">
-                <span>EUR/GBP</span>
-                <span class="text-[10px] text-emerald-400 font-semibold mt-0.5">+0.42%</span>
-            </button>
-            <button onclick="changePair('BTC/USD')" id="btn-BTC/USD" class="py-2.5 px-2 rounded-xl glass-card text-gray-400 font-semibold text-xs transition active:scale-95 flex flex-col items-center">
-                <span>BTC/USD</span>
-                <span class="text-[10px] text-emerald-400 font-semibold mt-0.5">+1.84%</span>
-            </button>
-            <button onclick="changePair('XAU/USD')" id="btn-XAU/USD" class="py-2.5 px-2 rounded-xl glass-card text-gray-400 font-semibold text-xs transition active:scale-95 flex flex-col items-center">
-                <span>XAU/USD</span>
-                <span class="text-[10px] text-rose-400 font-semibold mt-0.5">-0.15%</span>
-            </button>
+        <!-- Лента выбора Forex пар (горизонтальный скролл) -->
+        <div id="pairs-container" class="flex gap-2 mb-5 overflow-x-auto pb-1">
+            <!-- Кнопки генерируются динамически через скрипт -->
         </div>
 
         <div id="tab-terminal" class="space-y-4">
@@ -138,7 +128,6 @@ async def serve_mini_app():
                     <h2 id="pair-title" class="text-2xl font-black text-white tracking-tight">EUR/GBP</h2>
                     <div class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-teal-300 to-emerald-300 mt-1 flex items-baseline gap-2">
                         <span id="price-val">0.00000</span>
-                        <span class="text-xs font-extrabold text-emerald-400">+0.42%</span>
                     </div>
                 </div>
 
@@ -210,7 +199,23 @@ async def serve_mini_app():
     </div>
 
     <script>
+        const pairsList = ['EUR/GBP', 'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD'];
         let currentPair = 'EUR/GBP';
+
+        function renderPairs() {
+            const container = document.getElementById('pairs-container');
+            container.innerHTML = '';
+            pairsList.forEach(p => {
+                const btn = document.createElement('button');
+                btn.id = `btn-${p.replace('/', '')}`;
+                btn.onclick = () => changePair(p);
+                btn.className = p === currentPair ? 
+                    "py-2.5 px-3 rounded-xl active-tab text-cyan-300 font-extrabold text-xs transition active:scale-95 flex-shrink-0" :
+                    "py-2.5 px-3 rounded-xl glass-card text-gray-400 font-semibold text-xs transition active:scale-95 flex-shrink-0";
+                btn.innerText = p;
+                container.appendChild(btn);
+            });
+        }
 
         function switchTab(tab) {
             if (tab === 'terminal') {
@@ -228,14 +233,7 @@ async def serve_mini_app():
 
         function changePair(pair) {
             currentPair = pair;
-            ['EUR/GBP', 'BTC/USD', 'XAU/USD'].forEach(p => {
-                const btn = document.getElementById(`btn-${p}`);
-                if (p === pair) {
-                    btn.className = "py-2.5 px-2 rounded-xl active-tab text-cyan-300 font-extrabold text-xs transition active:scale-95 flex flex-col items-center";
-                } else {
-                    btn.className = "py-2.5 px-2 rounded-xl glass-card text-gray-400 font-semibold text-xs transition active:scale-95 flex flex-col items-center";
-                }
-            });
+            renderPairs();
             document.getElementById('pair-title').innerText = pair;
             fetchData();
         }
@@ -277,6 +275,7 @@ async def serve_mini_app():
             }
         }
 
+        renderPairs();
         setInterval(fetchData, 10000);
         fetchData();
     </script>
