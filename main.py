@@ -26,31 +26,33 @@ class EmeraldPayload(BaseModel):
 
 storage = {}
 
-def normalize_pair(pair_str: str) -> str:
-    clean = pair_str.upper().replace("/", "").strip()
+def normalize_key(pair_str: str) -> str:
+    clean = pair_str.upper().replace("/", "").replace("=X", "").strip()
     if len(clean) == 6:
         return f"{clean[:3]}/{clean[3:]}"
-    return pair_str.upper()
+    return clean
 
 @app.post("/api/webhook")
 async def receive_webhook(payload: EmeraldPayload):
     try:
-        norm_pair = normalize_pair(payload.pair)
+        norm_key = normalize_key(payload.pair)
         data = payload.dict()
-        data["pair"] = norm_pair
-        storage[norm_pair] = data
-        print(f"✅ Данные приняты для {norm_pair} | Цена: {data['price']}")
-        return {"status": "success", "pair": norm_pair}
+        data["pair"] = norm_key
+        storage[norm_key] = data
+        print(f"✅ Данные приняты для {norm_key} | Цена: {data['price']}")
+        return {"status": "success", "pair": norm_key}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/data/{pair:path}")
 async def get_pair_data(pair: str):
-    norm_pair = normalize_pair(pair)
-    if norm_pair in storage:
-        return storage[norm_pair]
+    norm_key = normalize_key(pair)
+    for key in storage:
+        if normalize_key(key) == norm_key:
+            return storage[key]
+            
     return {
-        "pair": norm_pair,
+        "pair": norm_key,
         "price": 0.0,
         "metrics": {
             "trend_htf": "WAIT",
@@ -81,9 +83,6 @@ async def serve_mini_app():
         .glow-buy { box-shadow: 0 0 35px rgba(0, 255, 136, 0.15); border-color: rgba(0, 255, 136, 0.4); background: linear-gradient(145deg, rgba(12, 30, 24, 0.9) 0%, rgba(8, 14, 20, 0.95) 100%); }
         .glow-sell { box-shadow: 0 0 35px rgba(255, 59, 48, 0.15); border-color: rgba(255, 59, 48, 0.4); background: linear-gradient(145deg, rgba(35, 15, 20, 0.9) 0%, rgba(8, 14, 20, 0.95) 100%); }
         .active-tab { background: linear-gradient(135deg, rgba(0, 229, 255, 0.2) 0%, rgba(0, 153, 255, 0.08) 100%); border: 1px solid rgba(0, 229, 255, 0.5); box-shadow: 0 0 20px rgba(0, 229, 255, 0.15); }
-        /* Стилизация скроллбара для списка пар */
-        ::-webkit-scrollbar { height: 4px; }
-        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 4px; }
     </style>
 </head>
 <body class="pb-24 max-w-md mx-auto min-h-screen flex flex-col justify-between selection:bg-cyan-500 selection:text-white">
@@ -106,10 +105,8 @@ async def serve_mini_app():
             </div>
         </div>
 
-        <!-- Лента выбора Forex пар (горизонтальный скролл) -->
-        <div id="pairs-container" class="flex gap-2 mb-5 overflow-x-auto pb-1">
-            <!-- Кнопки генерируются динамически через скрипт -->
-        </div>
+        <!-- Сетка выбора Forex пар (2 ряда по 3 пары — всё видно на экране без скролла) -->
+        <div id="pairs-container" class="grid grid-cols-3 gap-2 mb-5"></div>
 
         <div id="tab-terminal" class="space-y-4">
             <div id="main-card" class="glass-card rounded-2xl p-5 transition-all duration-300 relative overflow-hidden">
@@ -120,7 +117,7 @@ async def serve_mini_app():
                         <span class="w-2 h-2 rounded-full bg-emerald-400"></span> ПРЯМО СЕЙЧАС
                     </span>
                     <span id="badge-trend" class="px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-xs font-extrabold tracking-wide flex items-center gap-1">
-                        БЫЧИЙ ТРЕНД
+                        ОЖИДАНИЕ
                     </span>
                 </div>
 
@@ -133,7 +130,7 @@ async def serve_mini_app():
 
                 <div class="bg-gray-950/70 p-4 rounded-xl border border-gray-800/80 shadow-inner">
                     <div class="text-[10px] font-extrabold uppercase tracking-widest text-gray-400 mb-1">Вердикт алгоритма</div>
-                    <div id="v-text" class="text-lg font-black text-emerald-400 tracking-wide">СИЛЬНЫЙ ПОКУПАТЬ</div>
+                    <div id="v-text" class="text-lg font-black text-amber-400 tracking-wide">NEUTRAL WAIT</div>
                     
                     <div class="flex justify-between items-center mt-3 text-xs text-gray-400 font-medium">
                         <span>До зоны входа</span>
@@ -148,23 +145,23 @@ async def serve_mini_app():
             <div class="grid grid-cols-2 gap-3">
                 <div class="glass-card p-4 rounded-2xl relative overflow-hidden">
                     <div class="text-[10px] uppercase font-bold text-gray-400 mb-1">Индекс Херста</div>
-                    <div id="m-hurst" class="text-xl font-black text-white">0.58</div>
+                    <div id="m-hurst" class="text-xl font-black text-white">0.50</div>
                     <div class="text-[10px] font-semibold text-cyan-400 mt-0.5">Трендовый режим</div>
                 </div>
                 <div class="glass-card p-4 rounded-2xl relative overflow-hidden">
                     <div class="text-[10px] uppercase font-bold text-gray-400 mb-1">Information Ratio</div>
-                    <div id="m-ir" class="text-xl font-black text-emerald-400">+0.14</div>
+                    <div id="m-ir" class="text-xl font-black text-emerald-400">0.00</div>
                     <div class="text-[10px] font-semibold text-gray-400 mt-0.5">Эффективность</div>
                 </div>
                 <div class="glass-card p-4 rounded-2xl relative overflow-hidden">
                     <div class="text-[10px] uppercase font-bold text-gray-400 mb-1">Модель Сорнетте</div>
-                    <div id="m-lppl" class="text-base font-black text-emerald-400">СТАБИЛЬНО</div>
-                    <div class="text-[10px] font-semibold text-gray-400 mt-0.5">Нет риска пузыря</div>
+                    <div id="m-lppl" class="text-base font-black text-emerald-400">WAIT</div>
+                    <div class="text-[10px] font-semibold text-gray-400 mt-0.5">Риск пузыря</div>
                 </div>
                 <div class="glass-card p-4 rounded-2xl relative overflow-hidden">
                     <div class="text-[10px] uppercase font-bold text-gray-400 mb-1">Синергия сети</div>
-                    <div id="v-score" class="text-xl font-black text-amber-400">88/100</div>
-                    <div class="text-[10px] font-semibold text-gray-400 mt-0.5">Высокая точность</div>
+                    <div id="v-score" class="text-xl font-black text-amber-400">50/100</div>
+                    <div class="text-[10px] font-semibold text-gray-400 mt-0.5">Точность</div>
                 </div>
             </div>
         </div>
@@ -207,11 +204,10 @@ async def serve_mini_app():
             container.innerHTML = '';
             pairsList.forEach(p => {
                 const btn = document.createElement('button');
-                btn.id = `btn-${p.replace('/', '')}`;
                 btn.onclick = () => changePair(p);
                 btn.className = p === currentPair ? 
-                    "py-2.5 px-3 rounded-xl active-tab text-cyan-300 font-extrabold text-xs transition active:scale-95 flex-shrink-0" :
-                    "py-2.5 px-3 rounded-xl glass-card text-gray-400 font-semibold text-xs transition active:scale-95 flex-shrink-0";
+                    "py-2.5 px-1 rounded-xl active-tab text-cyan-300 font-extrabold text-xs transition active:scale-95 text-center flex items-center justify-center" :
+                    "py-2.5 px-1 rounded-xl glass-card text-gray-400 font-semibold text-xs transition active:scale-95 text-center flex items-center justify-center";
                 btn.innerText = p;
                 container.appendChild(btn);
             });
